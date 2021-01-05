@@ -35,134 +35,136 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
         throw new CypherError('Cost is not a number.', 'statCost: number', statCost)
       }
 
-      if (statName !== 'might' && statName !== 'speed' && statName !== 'intellect' && statName !== 'recovery-rolls') {
-        sendChat(`character|${character.id}`, `&{template:default} {{modStat=1}} {{noAttribute=${statName}}}`)
-        return
-      }
-      let obj1
-      const stat1 = statName
-      if (stat1 === 'recovery-rolls') {
-        const objArray = findObjs({
-          _type: 'attribute',
-          _characterid: character.id,
-          name: stat1
-        })
-        if (!objArray.length) {
-          obj1 = createObj('attribute', {
-            characterid: character.id,
-            name: stat1,
-            current: statCost
-          })
-        } else {
-          objArray[0].setWithWorker('current', statCost)
-        }
-        sendChat(`character|${character.id}`, 'Next recovery period updated.')
-      } else {
-        let pool1 = 0
-        let max1 = 0
-        let finalPool = 0
-        let objArray = findObjs({
-          _type: 'attribute',
-          name: stat1,
-          _characterid: character.id
-        })
-        if (!objArray.length) {
-          pool1 = parseInt(getAttrByName(character.id, stat1, 'current')) || 0
-          max1 = parseInt(getAttrByName(character.id, stat1, 'max')) || 0
-          obj1 = createObj('attribute', {
-            characterid: character.id,
-            name: stat1,
-            current: pool1,
-            max: max1
-          })
-        } else {
-          obj1 = objArray[0]
-          pool1 = parseInt(obj1.get('current')) || 0
-        }
-        if (statCost > pool1) {
-          // several stats will be diminished
-          let pool2
-          let pool3
-          let max2
-          let max3 = 0
-          let stat2
-          let stat3 = ''
-          let obj2
-          let obj3
-          switch (statName) {
-            case 'might':
-              stat2 = 'speed'
-              stat3 = 'intellect'
-              break
-            case 'speed':
-              stat2 = 'might'
-              stat3 = 'intellect'
-              break
-            case 'intellect':
-              stat2 = 'might'
-              stat3 = 'speed'
-              break
-          }
-          objArray = findObjs({
-            _type: 'attribute',
-            _characterid: character.id,
-            name: stat2
-          })
-          if (!objArray.length) {
-            pool2 = parseInt(getAttrByName(character.id, stat2, 'current')) || 0
-            max2 = parseInt(getAttrByName(character.id, stat2, 'max')) || 0
-            obj2 = createObj('attribute', {
-              characterid: character.id,
-              name: stat2,
-              current: pool2,
-              max: max2
-            })
+      let stat1
+      let stat2
+      let stat3
+
+      let max1 = 0
+      let max2 = 0
+      let max3 = 0
+
+      let pool1 = 0
+      let pool2 = 0
+      let pool3 = 0
+      let finalPool = 0
+
+      let attr1 = findObjs({
+        _type: 'attribute',
+        _characterid: character.id,
+        name: stat1
+      })[0]
+
+      switch (statName) {
+        case 'recovery-rolls': {
+          if (attr1) {
+            attr1.set('current', statCost)
           } else {
-            obj2 = objArray[0]
-            pool2 = parseInt(obj2.get('current')) || 0
-          }
-          objArray = findObjs({
-            _type: 'attribute',
-            _characterid: character.id,
-            name: stat3
-          })
-          if (!objArray.length) {
-            pool3 = parseInt(getAttrByName(character.id, stat3, 'current')) || 0
-            max3 = parseInt(getAttrByName(character.id, stat3, 'max')) || 0
-            obj3 = createObj('attribute', {
+            createObj('attribute', {
               characterid: character.id,
-              name: stat3,
-              current: pool3,
-              max: max3
+              name: statName,
+              current: statCost
             })
+          }
+          sendChat(`character|${character.id}`, 'Next recovery period updated.')
+          break
+        }
+
+        case 'might':
+          stat1 = 'might'
+          stat2 = 'speed'
+          stat3 = 'intellect'
+          // fallthrough
+        case 'speed':
+          stat1 = 'speed'
+          stat2 = 'might'
+          stat3 = 'intellect'
+          // fallthrough
+        case 'intellect': {
+          stat1 = 'intellect'
+          stat2 = 'might'
+          stat3 = 'speed'
+          if (attr1.length) {
+            pool1 = parseInt(attr1.get('current')) || 0
+            max1 = parseInt(attr1.get('max')) || 0
           } else {
-            obj3 = objArray[0]
-            pool3 = parseInt(obj3.get('current')) || 0
+            attr1 = createObj('attribute', {
+              characterid: character.id,
+              name: stat1,
+              current: pool1,
+              max: max1
+            })
           }
 
-          statCost = statCost - pool1
-          obj1.setWithWorker('current', 0)
-          if (statCost > pool2) {
-            statCost = statCost - pool2
-            obj2.setWithWorker('current', 0)
-            if (statCost > pool3) {
-              obj3.setWithWorker('current', 0)
-              sendChat(`character|${character.id}`, `He's dead, Jim! ${pool1}, ${pool2}, and ${pool3} down to 0.`)
+          // If first pool depleted, reduce second stat
+          if (statCost > pool1) {
+            statCost -= pool1
+            attr1.set('current', 0)
+            let attr2 = findObjs({
+              _type: 'attribute',
+              _characterid: character.id,
+              name: stat2
+            })[0]
+            if (attr2.length) {
+              pool2 = parseInt(attr2.get('current')) || 0
+              max2 = parseInt(attr2.get('max')) || 0
             } else {
-              finalPool = pool3 - statCost
-              obj3.setWithWorker('current', finalPool)
-              sendChat(`character|${character.id}`, `${stat1} and ${stat2} down to 0. ${stat3}: ${pool3}-${statCost}=${finalPool}`)
+              attr2 = createObj('attribute', {
+                characterid: character.id,
+                name: stat2,
+                current: pool2,
+                max: max2
+              })
             }
+
+            // If second pool depleted, reduce third stat
+            if (statCost > pool2) {
+              statCost -= pool2
+              attr2.set('current', 0)
+              let attr3 = findObjs({
+                _type: 'attribute',
+                _characterid: character.id,
+                name: stat3
+              })[0]
+              if (attr3.length) {
+                pool3 = parseInt(attr3.get('current')) || 0
+                max3 = parseInt(attr3.get('max')) || 0
+              } else {
+                attr3 = createObj('attribute', {
+                  characterid: character.id,
+                  name: stat3,
+                  current: pool3,
+                  max: max3
+                })
+              }
+
+              // If third pool depleted, player is dead
+              if (statCost >= pool3) {
+                attr3.set('current', 0)
+                sendChat(`character|${character.id}`, `He's dead, Jim! ${pool1}, ${pool2}, and ${pool3} down to 0.`)
+              // One pool remaining
+              } else {
+                finalPool = pool3 - statCost
+                attr3.set('current', finalPool)
+                sendChat(`character|${character.id}`, `${stat1} and ${stat2} down to 0. ${stat3}: ${pool3}-${statCost}=${finalPool}`)
+              }
+            // Two pools remaining
+            } else {
+              finalPool = pool2 - statCost
+              attr2.set('current', finalPool)
+              sendChat(`character|${character.id}`, `${stat1} down to 0. ${stat2}: ${pool2}-${statCost}=${finalPool}`)
+            }
+          // Three pools remaining
           } else {
-            finalPool = pool2 - statCost
-            obj2.setWithWorker('current', finalPool)
-            sendChat(`character|${character.id}`, `${stat1} down to 0. ${stat2}: ${pool2}-${statCost}=${finalPool}`)
+            finalPool = pool1 - statCost
+            attr1.set('current', finalPool)
+            sendChat(`character|${character.id}`, `${stat1}: ${pool1}-${statCost}=${finalPool}`)
           }
-        } else {
-          // just the current stat is diminished
-          finalPool = pool1 - statCost
-          obj1.setWithWorker('current', finalPool)
-          sendChat(`character|${character.id}`, `${stat1}: ${pool1}-${statCost}=${finalPool}`)
+          break
+        }
+
+        default: {
+          sendChat(`character|${character.id}`, `&{template:default} {{modstat=1}} {{noAttribute=${statName}}}`)
+          break
         }
       }
     }
@@ -229,11 +231,11 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
 
       const healthFinal = Math.min(Math.max((healthCurrent - dmgTaken), 0), healthMax)
       if (isChar) {
-        // Update character attributes
+        // Full NPC: update health attribute
         health.set('current', healthFinal)
         health.set('max', healthMax)
       } else {
-        // Mook: update bars only
+        // Mook: update health bars
         token.set('bar2_value', healthFinal)
         token.set('bar2_max', healthMax)
       }
