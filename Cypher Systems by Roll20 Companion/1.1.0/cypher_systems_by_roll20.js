@@ -1,10 +1,8 @@
 /* globals createObj, findObjs, getAttrByName, getObj, log, on, sendChat */
-/* read Help.txt */
 const CypherSystemsByRoll20 = (function () {
   'use strict'
   const version = '1.1.0'
   const modified = '2020-01-01'
-  // const schemaversion = 1.0
   const author = 'Natha (roll20userid:75857)'
   function checkInstall () {
     log(`========================================================================
@@ -45,7 +43,6 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
       const statName = args[1]
       let statCost = args[2]
 
-      // checking the stat
       if (statName !== 'might' && statName !== 'speed' && statName !== 'intellect' && statName !== 'recovery-rolls') {
         sendChat(`character|${character.id}`, `&{template:default} {{modStat=1}} {{noAttribute=${statName}}}`)
         return
@@ -69,7 +66,6 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
         }
         sendChat(`character|${character.id}`, 'Next recovery period updated.')
       } else {
-        // stat pool modification
         let pool1 = 0
         let max1 = 0
         let finalPool = 0
@@ -151,7 +147,7 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
             obj3 = objArray[0]
             pool3 = parseInt(obj3.get('current')) || 0
           }
-          // calculus
+
           statCost = statCost - pool1
           obj1.setWithWorker('current', 0)
           if (statCost > pool2) {
@@ -179,7 +175,7 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
       }
     }
 
-    // params: token_id|damage|apply_armor_y/n
+    // expected parameter array: token_id|damage|apply_armor_y/n
     function npcDamage (args) {
       if (!Array.isArray(args)) {
         throw new CypherError('Invalid command arguments.', 'token_id: string\ndamage: number\napply_armor_y/n: boolean', args)
@@ -199,43 +195,44 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
         throw new CypherError('Token does not represent a character.', 'token_id.represents: string', args[0])
       }
 
-      const dmgDealt = args[1]
+      const dmgDealt = parseInt(args[1], 10)
+      if (!dmgDealt) {
+        throw new CypherError('Damage dealt is not a number.', 'damage: number', args[0])
+      }
+
       const applyArmor = args[2]
 
-      // Apply damage (or healing if dmgDealt is negative ...) to Numenera NPC/Creature
+      // Apply damage (or healing if dmgDealt is negative ...) to Cypher NPC/Creature
       // And set 'death' marker if health is 0 or less.
-      // The Mook or Non Player full Character must have the following attributes :
-      //  - Level (token bar1)
-      //  - Health (token bar2)
-      //  - Armor (token bar3)
-      // Armor will diminish damage unless 'applyArmor'='n'
+      // The Mook or Non Player full Character must have the following attributes:
+      // - Level (token bar1)
+      // - Health (token bar2)
+      // - Armor (token bar3)
+      //   * Armor will diminish damage unless applyArmor === 'n'
       const npcName = character.get('name')
-      let dmg = parseInt(dmgDealt) || 0
+      let dmg = dmgDealt
       let npcHealth = 0
       let npcMaxHealth = 0
       let npcArmor = 0
       let attributes = {}
       if (applyArmor !== 'n') {
-        npcArmor = parseInt(getAttrByName(character.id, 'armor', 'current')) || 0
-        // DEBUG
-        // sendChat('Cypher System', `/w gm npcDamage() Debug : Armor of ("${npcName}", char id:${characterObj.id}, token id:${tokenObj.id}) = ${npcArmor}`)
+        npcArmor = parseInt(getAttrByName(character.id, 'armor', 'current'), 10) || 0
       }
       // Is the token linked to the character ('full NPC') or a Mook ?
       const isChar = token.get('bar1_link')
-      if (isChar === '') {
-        // It's a Mook : get the bars value
+      if (!isChar) {
+        // Mook: get the bars value
         npcHealth = parseInt(token.get('bar2_value'))
         npcMaxHealth = parseInt(token.get('bar2_max'))
       } else {
-        // It's a full character NPC, so get the attributes values
+        // Full-character NPC, so get the attributes values
         attributes = findObjs({
           _type: 'attribute',
           _characterid: character.id,
           name: 'health'
         })
-        if (attributes === false) {
-          sendChat('Cypher System', `/w gm npcDamage() Error: ${npcName} has no health attribute!`)
-          return false
+        if (!attributes && !attributes.length) {
+          throw new CypherError(`${npcName} has no health attribute.`, 'attribute: object', attributes)
         } else {
           npcHealth = parseInt(attributes[0].get('current')) || 0
           npcMaxHealth = parseInt(attributes[0].get('max')) || 0
@@ -267,7 +264,6 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
   })()
 
   function executeChatCommand (msg) {
-    // Validate chat command
     const validCommand = /^!cypher-\w+(\s|%20).+$/
     if (msg.type === 'api' && validCommand.test(msg.content)) {
       const command = msg.content.split(' ')[0]
