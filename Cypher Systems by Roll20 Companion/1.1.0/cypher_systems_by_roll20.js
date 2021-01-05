@@ -14,18 +14,32 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
 =========================================================================`)
   }
 
+  function CypherError (message, expected, actual) {
+    this.name = 'CypherError'
+    this.message = message
+    this.expected = expected
+    this.actual = actual
+    this.toString = function () {
+      return `&{template:default} {{Name=${this.name}}} {{Message=${this.message}}} {{Expected=${this.expected}}} {{Actual=${this.actual}}}`
+    }
+  }
+
+  CypherError.prototype = new Error()
+
   const CypherChatCommands = (function () {
-    // params: character_id|stat|cost
+    // expected parameter array: [character_id, stat, cost]
     function modifyStat (args) {
+      if (!Array.isArray(args)) {
+        throw new CypherError('Invalid command arguments.', 'character_id: string\nstat: number\ncost: number', args)
+      }
+
       if (args.length !== 3) {
-        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-modstat}} {{Message=Invalid parameters}} {{Expected=character_id,stat,cost}} {{Received=${args}}}`)
-        return false
+        throw new CypherError('Command requires 3 arguments.', 'character_id: string\nstat: number\ncost: number', args.join('\n'))
       }
 
       const character = getObj('character', args[0])
       if (!character) {
-        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-modstat}} {{Message=Character not found: ${args[0]}}}`)
-        return false
+        throw new CypherError('Character ID not found', 'character_id: string', args[0])
       }
 
       const statName = args[1]
@@ -167,21 +181,22 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
 
     // params: token_id|damage|apply_armor_y/n
     function npcDamage (args) {
+      if (!Array.isArray(args)) {
+        throw new CypherError('Invalid command arguments.', 'token_id: string\ndamage: number\napply_armor_y/n: boolean', args)
+      }
+
       if (args.length !== 3) {
-        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-npcdmg}} {{Message=Invalid parameters}} {{Expected=token_id,damage,apply_armor_y/n}} {{Received=${args}}}`)
-        return false
+        throw new CypherError('Command requires 3 arguments.', 'token_id: string\ndamage: number\napply_armor_y/n: boolean', args.join('\n'))
       }
 
       const token = getObj('graphic', args[0])
       if (!token) {
-        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-npcdmg}} {{Message=Token not found: ${args[0]}}}`)
-        return false
+        throw new CypherError('Token not found.', 'token_id: string', args[0])
       }
 
       const character = getObj('character', token.get('represents'))
       if (!character) {
-        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-npcdmg}} {{Message=Token does not represent a character: ${args[0]}}}`)
-        return false
+        throw new CypherError('Token does not represent a character.', 'token_id.represents: string', args[0])
       }
 
       const dmgDealt = args[1]
@@ -260,7 +275,8 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
       try {
         CypherChatCommands[command](args)
       } catch (e) {
-        sendChat('Cypher System', `/w gm Error: Chat command ${command} failed. ${e}`)
+        sendChat('Cypher System', `/w gm Chat command ${command} failed.`)
+        sendChat('Cypher System', `/w gm ${e}`)
       }
     }
   }
