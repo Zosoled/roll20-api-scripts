@@ -2,7 +2,7 @@
 const CypherSystemsByRoll20 = (function () {
   'use strict'
   const version = '1.1.0'
-  const modified = '2020-01-01'
+  const modified = '2020-01-04'
   const author = 'Natha (roll20userid:75857)'
   function checkInstall () {
     log(`========================================================================
@@ -25,23 +25,15 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
   CypherError.prototype = new Error()
 
   const CypherChatCommands = (function () {
-    // expected parameter array: [character_id, stat, cost]
-    function modstat (args) {
-      if (!Array.isArray(args)) {
-        throw new CypherError('Invalid command arguments.', 'character_id: string\nstat: number\ncost: number', args)
-      }
-
-      if (args.length !== 3) {
-        throw new CypherError('Command requires 3 arguments.', 'character_id: string\nstat: number\ncost: number', args.join('\n'))
-      }
-
-      const character = getObj('character', args[0])
+    // Applies cost of skills and abilities to PC stat pools, and shows chat warnings if one or more pools are at zero.
+    function modifyStat (characterId, statName, statCost) {
+      const character = getObj('character', characterId)
       if (!character) {
-        throw new CypherError('Character ID not found', 'character_id: string', args[0])
+        throw new CypherError('Character ID not found', 'characterId: string', characterId)
       }
-
-      const statName = args[1]
-      let statCost = args[2]
+      if (!parseInt(statCost, 10)) {
+        throw new CypherError('Cost is not a number.', 'statCost: number', statCost)
+      }
 
       if (statName !== 'might' && statName !== 'speed' && statName !== 'intellect' && statName !== 'recovery-rolls') {
         sendChat(`character|${character.id}`, `&{template:default} {{modStat=1}} {{noAttribute=${statName}}}`)
@@ -206,10 +198,10 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
         ? Math.max((dmgDealt - armor), 0)
         : dmgDealt
 
-      // Health objects differ between full NPCs and mooks, so they must be declared first
+      // Health objects differ between full NPCs and mooks, so they must be declared prior to assignment
       let health = {}
-      let currentHealth = 0
-      let maxHealth = 0
+      let healthCurrent = 0
+      let healthMax = 0
 
       // Is the token linked to a full NPC or just a Mook?
       const isChar = token.get('bar1_link')
@@ -224,33 +216,33 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
           throw new CypherError(`${name} has no health attribute.`, 'attribute: object', health)
         }
         health = health[0]
-        currentHealth = parseInt(health.get('current'))
-        maxHealth = parseInt(health.get('max'))
+        healthCurrent = parseInt(health.get('current'))
+        healthMax = parseInt(health.get('max'))
       } else {
         // Mook: get the health bar values
-        currentHealth = parseInt(token.get('bar2_value'))
-        maxHealth = parseInt(token.get('bar2_max'))
+        healthCurrent = parseInt(token.get('bar2_value'))
+        healthMax = parseInt(token.get('bar2_max'))
       }
 
       // If health attribute has no max, set max to current health
-      maxHealth = Math.max(currentHealth, maxHealth)
+      healthMax = Math.max(healthCurrent, healthMax)
 
-      const npcHealthFinal = Math.min(Math.max((currentHealth - dmgTaken), 0), maxHealth)
-      if (!isChar) {
-        // Mook: update bars only
-        token.set('bar2_value', npcHealthFinal)
-        token.set('bar2_max', maxHealth)
-      } else {
+      const healthFinal = Math.min(Math.max((healthCurrent - dmgTaken), 0), healthMax)
+      if (isChar) {
         // Update character attributes
-        health.setWithWorker('max', maxHealth)
-        health.setWithWorker('current', npcHealthFinal)
+        health.set('current', healthFinal)
+        health.set('max', healthMax)
+      } else {
+        // Mook: update bars only
+        token.set('bar2_value', healthFinal)
+        token.set('bar2_max', healthMax)
       }
-      token.set('status_dead', (npcHealthFinal === 0))
-      sendChat('Cypher System', `/w gm ${name} receives ${Math.abs(dmgTaken)} points of ${dmgDealt >= 0 ? `damage (${dmgDealt} - ${armor} Armor)` : 'healing'}. Health: ${currentHealth}->${npcHealthFinal}.`)
+      token.set('status_dead', (healthFinal === 0))
+      sendChat('Cypher System', `/w gm ${name} receives ${Math.abs(dmgTaken)} points of ${dmgDealt >= 0 ? `damage (${dmgDealt} - ${armor} Armor)` : 'healing'}. Health: ${healthCurrent}->${healthFinal}.`)
     }
 
     return {
-      '!cypher-modstat': modstat,
+      '!cypher-modstat': modifyStat,
       '!cypher-npcdmg': applyDamageOrHealing
     }
   })()
