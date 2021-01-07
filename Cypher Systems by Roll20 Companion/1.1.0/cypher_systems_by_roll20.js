@@ -1,8 +1,8 @@
 /* globals createObj, findObjs, getAttrByName, getObj, log, on, sendChat */
 const CypherSystemsByRoll20 = (function () {
   'use strict'
-  const version = '1.1.0'
-  const modified = '2020-01-04'
+  const version = '1.1.1'
+  const modified = '2020-01-06'
   const author = 'Natha (roll20userid:75857)'
   function checkInstall () {
     log(`========================================================================
@@ -24,6 +24,102 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
   CypherError.prototype = new Error()
 
   const CypherChatCommands = (function () {
+    // private
+    function depleteStats (character, cost, stat1, stat2, stat3) {
+      let finalPool = 0
+
+      let pool1 = 0
+      let pool2 = 0
+      let pool3 = 0
+
+      let max1 = 0
+      let max2 = 0
+      let max3 = 0
+
+      let attr1 = findObjs({
+        _type: 'attribute',
+        _characterid: character.id,
+        name: stat1
+      })[0]
+      if (attr1) {
+        pool1 = parseInt(attr1.get('current')) || 0
+        max1 = parseInt(attr1.get('max')) || 0
+      } else {
+        attr1 = createObj('attribute', {
+          characterid: character.id,
+          name: stat1,
+          current: pool1,
+          max: max1
+        })
+      }
+
+      // If first pool depleted, reduce second stat
+      if (cost > pool1) {
+        cost -= pool1
+        attr1.set('current', 0)
+        let attr2 = findObjs({
+          _type: 'attribute',
+          _characterid: character.id,
+          name: stat2
+        })[0]
+        if (attr2) {
+          pool2 = parseInt(attr2.get('current')) || 0
+          max2 = parseInt(attr2.get('max')) || 0
+        } else {
+          attr2 = createObj('attribute', {
+            characterid: character.id,
+            name: stat2,
+            current: pool2,
+            max: max2
+          })
+        }
+
+        // If second pool depleted, reduce third stat
+        if (cost > pool2) {
+          cost -= pool2
+          attr2.set('current', 0)
+          let attr3 = findObjs({
+            _type: 'attribute',
+            _characterid: character.id,
+            name: stat3
+          })[0]
+          if (attr3) {
+            pool3 = parseInt(attr3.get('current')) || 0
+            max3 = parseInt(attr3.get('max')) || 0
+          } else {
+            attr3 = createObj('attribute', {
+              characterid: character.id,
+              name: stat3,
+              current: pool3,
+              max: max3
+            })
+          }
+
+          // If third pool depleted, player is dead
+          if (cost >= pool3) {
+            attr3.set('current', 0)
+            sendChat(`character|${character.id}`, `He's dead, Jim! ${stat1}, ${stat2}, and ${stat3} down to 0.`)
+          // One pool remaining
+          } else {
+            finalPool = pool3 - cost
+            attr3.set('current', finalPool)
+            sendChat(`character|${character.id}`, `${stat1} and ${stat2} down to 0. ${stat3}: ${pool3}-${cost}=${finalPool}`)
+          }
+        // Two pools remaining
+        } else {
+          finalPool = pool2 - cost
+          attr2.set('current', finalPool)
+          sendChat(`character|${character.id}`, `${stat1} down to 0. ${stat2}: ${pool2}-${cost}=${finalPool}`)
+        }
+      // Three pools remaining
+      } else {
+        finalPool = pool1 - cost
+        attr1.set('current', finalPool)
+        sendChat(`character|${character.id}`, `${stat1}: ${pool1}-${cost}=${finalPool}`)
+      }
+    }
+
+    // public
     return {
       // Applies cost of skills and abilities to PC stat pools, and shows chat warnings if one or more pools are at zero.
       '!cypher-modstat': function (characterId, statName, statCost) {
@@ -39,25 +135,15 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
         let stat2
         let stat3
 
-        let max1 = 0
-        let max2 = 0
-        let max3 = 0
-
-        let pool1 = 0
-        let pool2 = 0
-        let pool3 = 0
-        let finalPool = 0
-
-        let attr1 = findObjs({
-          _type: 'attribute',
-          _characterid: character.id,
-          name: stat1
-        })[0]
-
         switch (statName) {
           case 'recovery-rolls': {
-            if (attr1) {
-              attr1.set('current', statCost)
+            const attr = findObjs({
+              _type: 'attribute',
+              _characterid: character.id,
+              name: statName
+            })[0]
+            if (attr) {
+              attr.set('current', statCost)
             } else {
               createObj('attribute', {
                 characterid: character.id,
@@ -73,94 +159,20 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
             stat1 = 'might'
             stat2 = 'speed'
             stat3 = 'intellect'
-          // fallthrough
+            depleteStats(character, statCost, stat1, stat2, stat3)
+            break
           case 'speed':
             stat1 = 'speed'
             stat2 = 'might'
             stat3 = 'intellect'
-          // fallthrough
-          case 'intellect': {
+            depleteStats(character, statCost, stat1, stat2, stat3)
+            break
+          case 'intellect':
             stat1 = 'intellect'
             stat2 = 'might'
             stat3 = 'speed'
-            if (attr1.length) {
-              pool1 = parseInt(attr1.get('current')) || 0
-              max1 = parseInt(attr1.get('max')) || 0
-            } else {
-              attr1 = createObj('attribute', {
-                characterid: character.id,
-                name: stat1,
-                current: pool1,
-                max: max1
-              })
-            }
-
-            // If first pool depleted, reduce second stat
-            if (statCost > pool1) {
-              statCost -= pool1
-              attr1.set('current', 0)
-              let attr2 = findObjs({
-                _type: 'attribute',
-                _characterid: character.id,
-                name: stat2
-              })[0]
-              if (attr2.length) {
-                pool2 = parseInt(attr2.get('current')) || 0
-                max2 = parseInt(attr2.get('max')) || 0
-              } else {
-                attr2 = createObj('attribute', {
-                  characterid: character.id,
-                  name: stat2,
-                  current: pool2,
-                  max: max2
-                })
-              }
-
-              // If second pool depleted, reduce third stat
-              if (statCost > pool2) {
-                statCost -= pool2
-                attr2.set('current', 0)
-                let attr3 = findObjs({
-                  _type: 'attribute',
-                  _characterid: character.id,
-                  name: stat3
-                })[0]
-                if (attr3.length) {
-                  pool3 = parseInt(attr3.get('current')) || 0
-                  max3 = parseInt(attr3.get('max')) || 0
-                } else {
-                  attr3 = createObj('attribute', {
-                    characterid: character.id,
-                    name: stat3,
-                    current: pool3,
-                    max: max3
-                  })
-                }
-
-                // If third pool depleted, player is dead
-                if (statCost >= pool3) {
-                  attr3.set('current', 0)
-                  sendChat(`character|${character.id}`, `He's dead, Jim! ${pool1}, ${pool2}, and ${pool3} down to 0.`)
-                  // One pool remaining
-                } else {
-                  finalPool = pool3 - statCost
-                  attr3.set('current', finalPool)
-                  sendChat(`character|${character.id}`, `${stat1} and ${stat2} down to 0. ${stat3}: ${pool3}-${statCost}=${finalPool}`)
-                }
-                // Two pools remaining
-              } else {
-                finalPool = pool2 - statCost
-                attr2.set('current', finalPool)
-                sendChat(`character|${character.id}`, `${stat1} down to 0. ${stat2}: ${pool2}-${statCost}=${finalPool}`)
-              }
-              // Three pools remaining
-            } else {
-              finalPool = pool1 - statCost
-              attr1.set('current', finalPool)
-              sendChat(`character|${character.id}`, `${stat1}: ${pool1}-${statCost}=${finalPool}`)
-            }
+            depleteStats(character, statCost, stat1, stat2, stat3)
             break
-          }
 
           default: {
             sendChat(`character|${character.id}`, `&{template:default} {{modstat=1}} {{noAttribute=${statName}}}`)
@@ -213,11 +225,10 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
             _type: 'attribute',
             _characterid: character.id,
             name: 'health'
-          })
-          if (!health.length) {
+          })[0]
+          if (!health) {
             throw new CypherError(`${name} has no health attribute.`, 'attribute: object', health)
           }
-          health = health[0]
           healthCurrent = parseInt(health.get('current'))
           healthMax = parseInt(health.get('max'))
         } else {
