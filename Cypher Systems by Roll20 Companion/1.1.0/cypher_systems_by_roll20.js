@@ -18,110 +18,64 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
     this.expected = expected
     this.actual = actual
     this.toString = function () {
-      return `&{template:default} {{Name=${this.name}}} {{Message=${this.message}}} {{Expected=${this.expected}}} {{Actual=${this.actual}}}`
+      return `&{template:default} {{name=${this.name}}} {{Message=${this.message}}} {{Expected=${this.expected}}} {{Actual=${this.actual}}}`
     }
   }
   CypherError.prototype = new Error()
 
   const CypherChatCommands = (function () {
     // private
-    function depleteStats (character, cost, stat1, stat2, stat3) {
-      let finalPool = 0
+    // Depletes the three character pools in sequence according to a specific damage cost
+    function applyDamage (character, stat1, stat2, stat3, cost) {
+      sendChat(`character|${character.id}`, `Took ${cost} damage!`)
+      cost = depletePool(character, stat1, cost)
+      cost = depletePool(character, stat2, cost)
+      cost = depletePool(character, stat3, cost)
 
-      let pool1 = 0
-      let pool2 = 0
-      let pool3 = 0
+      broadcastStatus(character)
+    }
 
-      let max1 = 0
-      let max2 = 0
-      let max3 = 0
-
-      let attr1 = findObjs({
+    // Reduces a pool by a specific damage cost.
+    // If the cost is greater than the pool, set the pool to zero and return the remaining cost.
+    function depletePool (character, stat, cost) {
+      let pool = 0
+      let max = 0
+      let attr = findObjs({
         _type: 'attribute',
         _characterid: character.id,
-        name: stat1
+        name: stat
       })[0]
-      if (attr1) {
-        pool1 = parseInt(attr1.get('current')) || 0
-        max1 = parseInt(attr1.get('max')) || 0
+      if (attr) {
+        pool = parseInt(attr.get('current')) || 0
+        max = parseInt(attr.get('max')) || 0
       } else {
-        attr1 = createObj('attribute', {
+        attr = createObj('attribute', {
           characterid: character.id,
-          name: stat1,
-          current: pool1,
-          max: max1
+          name: stat,
+          current: pool,
+          max: max
         })
       }
+      attr.set('current', Math.min(max, Math.max(pool - cost, 0)))
+      return Math.max(cost - pool, 0)
+    }
 
-      // If first pool depleted, reduce second stat
-      if (cost > pool1) {
-        cost -= pool1
-        attr1.set('current', 0)
-        let attr2 = findObjs({
-          _type: 'attribute',
-          _characterid: character.id,
-          name: stat2
-        })[0]
-        if (attr2) {
-          pool2 = parseInt(attr2.get('current')) || 0
-          max2 = parseInt(attr2.get('max')) || 0
-        } else {
-          attr2 = createObj('attribute', {
-            characterid: character.id,
-            name: stat2,
-            current: pool2,
-            max: max2
-          })
-        }
+    // Sends chat message with status of a character's pools.
+    // If all pools are depleted, player is dead.
+    function broadcastStatus (character) {
+      const might = getAttrByName(character.id, 'might')
+      const speed = getAttrByName(character.id, 'speed')
+      const intellect = getAttrByName(character.id, 'intellect')
 
-        // If second pool depleted, reduce third stat
-        if (cost > pool2) {
-          cost -= pool2
-          attr2.set('current', 0)
-          let attr3 = findObjs({
-            _type: 'attribute',
-            _characterid: character.id,
-            name: stat3
-          })[0]
-          if (attr3) {
-            pool3 = parseInt(attr3.get('current')) || 0
-            max3 = parseInt(attr3.get('max')) || 0
-          } else {
-            attr3 = createObj('attribute', {
-              characterid: character.id,
-              name: stat3,
-              current: pool3,
-              max: max3
-            })
-          }
-
-          // If third pool depleted, player is dead
-          if (cost >= pool3) {
-            attr3.set('current', 0)
-            sendChat(`character|${character.id}`, `He's dead, Jim! ${stat1}, ${stat2}, and ${stat3} down to 0.`)
-          // One pool remaining
-          } else {
-            finalPool = pool3 - cost
-            attr3.set('current', finalPool)
-            sendChat(`character|${character.id}`, `${stat1} and ${stat2} down to 0. ${stat3}: ${pool3}-${cost}=${finalPool}`)
-          }
-        // Two pools remaining
-        } else {
-          finalPool = pool2 - cost
-          attr2.set('current', finalPool)
-          sendChat(`character|${character.id}`, `${stat1} down to 0. ${stat2}: ${pool2}-${cost}=${finalPool}`)
-        }
-      // Three pools remaining
-      } else {
-        finalPool = pool1 - cost
-        attr1.set('current', finalPool)
-        sendChat(`character|${character.id}`, `${stat1}: ${pool1}-${cost}=${finalPool}`)
+      sendChat(`character|${character.id}`, `&{template:default} {{name=Pools}} {{Might=${might}}} {{Speed=${speed}}} {{Intellect=${intellect}}}`)
+      if (might + speed + intellect <= 0) {
+        sendChat(`character|${character.id}`, `💀 R.I.P. ${character.get('name')} 💀`)
       }
     }
 
     // public
     return {
-      // Applies cost of skills and abilities to PC stat pools, and shows chat warnings if one or more pools are at zero.
+      // Applies cost of skills and abilities to PC stat pools.
       '!cypher-modstat': function (characterId, statName, statCost) {
         const character = getObj('character', characterId)
         if (!character) {
@@ -130,10 +84,6 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
         if (!parseInt(statCost, 10)) {
           throw new CypherError('Cost is not a number.', 'statCost: number', statCost)
         }
-
-        let stat1
-        let stat2
-        let stat3
 
         switch (statName) {
           case 'recovery-rolls': {
@@ -154,26 +104,15 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
             sendChat(`character|${character.id}`, 'Next recovery period updated.')
             break
           }
-
           case 'might':
-            stat1 = 'might'
-            stat2 = 'speed'
-            stat3 = 'intellect'
-            depleteStats(character, statCost, stat1, stat2, stat3)
+            applyDamage(character, 'might', 'speed', 'intellect', statCost)
             break
           case 'speed':
-            stat1 = 'speed'
-            stat2 = 'might'
-            stat3 = 'intellect'
-            depleteStats(character, statCost, stat1, stat2, stat3)
+            applyDamage(character, 'speed', 'might', 'intellect', statCost)
             break
           case 'intellect':
-            stat1 = 'intellect'
-            stat2 = 'might'
-            stat3 = 'speed'
-            depleteStats(character, statCost, stat1, stat2, stat3)
+            applyDamage(character, 'intellect', 'might', 'speed', statCost)
             break
-
           default: {
             sendChat(`character|${character.id}`, `&{template:default} {{modstat=1}} {{noAttribute=${statName}}}`)
             break
