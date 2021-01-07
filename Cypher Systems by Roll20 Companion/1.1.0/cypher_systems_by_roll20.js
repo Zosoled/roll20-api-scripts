@@ -1,8 +1,10 @@
 /* globals createObj, findObjs, getAttrByName, getObj, log, on, sendChat */
+/* read Help.txt */
 const CypherSystemsByRoll20 = (function () {
   'use strict'
-  const version = '1.1.1'
-  const modified = '2020-01-06'
+  const version = '1.1.0'
+  const modified = '2020-01-01'
+  // const schemaversion = 1.0
   const author = 'Natha (roll20userid:75857)'
   function checkInstall () {
     log(`========================================================================
@@ -12,199 +14,253 @@ This script is designed for the Cypher Systems by Roll20 character sheet.
 =========================================================================`)
   }
 
-  function CypherError (message, expected, actual) {
-    this.name = 'CypherError'
-    this.message = message
-    this.expected = expected
-    this.actual = actual
-    this.toString = function () {
-      return `&{template:default} {{name=${this.name}}} {{Message=${this.message}}} {{Expected=${this.expected}}} {{Actual=${this.actual}}}`
-    }
-  }
-  CypherError.prototype = new Error()
-
   const CypherChatCommands = (function () {
-    // private
-    // Depletes the three character pools in sequence according to a specific damage cost
-    function applyDamage (character, stat1, stat2, stat3, cost) {
-      sendChat(`character|${character.id}`, `Took ${cost} damage!`)
-      cost = depletePool(character, stat1, cost)
-      cost = depletePool(character, stat2, cost)
-      cost = depletePool(character, stat3, cost)
+    // params: character_id|stat|cost
+    function modifyStat (args) {
+      if (args.length !== 3) {
+        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-modstat}} {{Message=Invalid parameters}} {{Expected=character_id,stat,cost}} {{Received=${args}}}`)
+        return false
+      }
 
-      broadcastStatus(character)
-    }
+      const character = getObj('character', args[0])
+      if (!character) {
+        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-modstat}} {{Message=Character not found: ${args[0]}}}`)
+        return false
+      }
 
-    // Reduces a pool by a specific damage cost.
-    // If the cost is greater than the pool, set the pool to zero and return the remaining cost.
-    function depletePool (character, stat, cost) {
-      let pool = 0
-      let max = 0
-      let attr = findObjs({
-        _type: 'attribute',
-        _characterid: character.id,
-        name: stat
-      })[0]
-      if (attr) {
-        pool = parseInt(attr.get('current')) || 0
-        max = parseInt(attr.get('max')) || 0
-      } else {
-        attr = createObj('attribute', {
-          characterid: character.id,
-          name: stat,
-          current: pool,
-          max: max
+      const statName = args[1]
+      let statCost = args[2]
+
+      // checking the stat
+      if (statName !== 'might' && statName !== 'speed' && statName !== 'intellect' && statName !== 'recovery-rolls') {
+        sendChat(`character|${character.id}`, `&{template:default} {{modStat=1}} {{noAttribute=${statName}}}`)
+        return
+      }
+      let obj1
+      const stat1 = statName
+      if (stat1 === 'recovery-rolls') {
+        const objArray = findObjs({
+          _type: 'attribute',
+          _characterid: character.id,
+          name: stat1
         })
-      }
-      attr.set('current', Math.min(max, Math.max(pool - cost, 0)))
-      return Math.max(cost - pool, 0)
-    }
-
-    // Sends chat message with status of a character's pools.
-    // If all pools are depleted, player is dead.
-    function broadcastStatus (character) {
-      const might = getAttrByName(character.id, 'might')
-      const speed = getAttrByName(character.id, 'speed')
-      const intellect = getAttrByName(character.id, 'intellect')
-
-      sendChat(`character|${character.id}`, `&{template:default} {{name=Pools}} {{Might=${might}}} {{Speed=${speed}}} {{Intellect=${intellect}}}`)
-      if (might + speed + intellect <= 0) {
-        sendChat(`character|${character.id}`, `💀 R.I.P. ${character.get('name')} 💀`)
-      }
-    }
-
-    // public
-    return {
-      // Applies cost of skills and abilities to PC stat pools.
-      '!cypher-modstat': function (characterId, statName, statCost) {
-        const character = getObj('character', characterId)
-        if (!character) {
-          throw new CypherError('Character ID not found', 'characterId: string', characterId)
+        if (!objArray.length) {
+          obj1 = createObj('attribute', {
+            characterid: character.id,
+            name: stat1,
+            current: statCost
+          })
+        } else {
+          objArray[0].setWithWorker('current', statCost)
         }
-        if (!parseInt(statCost, 10)) {
-          throw new CypherError('Cost is not a number.', 'statCost: number', statCost)
+        sendChat(`character|${character.id}`, 'Next recovery period updated.')
+      } else {
+        // stat pool modification
+        let pool1 = 0
+        let max1 = 0
+        let finalPool = 0
+        let objArray = findObjs({
+          _type: 'attribute',
+          name: stat1,
+          _characterid: character.id
+        })
+        if (!objArray.length) {
+          pool1 = parseInt(getAttrByName(character.id, stat1, 'current')) || 0
+          max1 = parseInt(getAttrByName(character.id, stat1, 'max')) || 0
+          obj1 = createObj('attribute', {
+            characterid: character.id,
+            name: stat1,
+            current: pool1,
+            max: max1
+          })
+        } else {
+          obj1 = objArray[0]
+          pool1 = parseInt(obj1.get('current')) || 0
         }
-
-        switch (statName) {
-          case 'recovery-rolls': {
-            const attr = findObjs({
-              _type: 'attribute',
-              _characterid: character.id,
-              name: statName
-            })[0]
-            if (attr) {
-              attr.set('current', statCost)
-            } else {
-              createObj('attribute', {
-                characterid: character.id,
-                name: statName,
-                current: statCost
-              })
-            }
-            sendChat(`character|${character.id}`, 'Next recovery period updated.')
-            break
+        if (statCost > pool1) {
+          // several stats will be diminished
+          let pool2
+          let pool3
+          let max2
+          let max3 = 0
+          let stat2
+          let stat3 = ''
+          let obj2
+          let obj3
+          switch (statName) {
+            case 'might':
+              stat2 = 'speed'
+              stat3 = 'intellect'
+              break
+            case 'speed':
+              stat2 = 'might'
+              stat3 = 'intellect'
+              break
+            case 'intellect':
+              stat2 = 'might'
+              stat3 = 'speed'
+              break
           }
-          case 'might':
-            applyDamage(character, 'might', 'speed', 'intellect', statCost)
-            break
-          case 'speed':
-            applyDamage(character, 'speed', 'might', 'intellect', statCost)
-            break
-          case 'intellect':
-            applyDamage(character, 'intellect', 'might', 'speed', statCost)
-            break
-          default: {
-            sendChat(`character|${character.id}`, `&{template:default} {{modstat=1}} {{noAttribute=${statName}}}`)
-            break
-          }
-        }
-      },
-
-      // Apply damage (or healing if dmgDealt is negative) to Cypher NPC/Creature, and set 'death' marker if health is 0 or less.
-      // The Mook or full NPC must have the following attributes:
-      // - Level (token bar1)
-      // - Health (token bar2)
-      // - Armor (token bar3)
-      //   * Armor will diminish damage unless applyArmor === 'n'
-      '!cypher-npcdmg': function (tokenId, dmgDealt, applyArmor) {
-        const token = getObj('graphic', tokenId)
-        if (!token) {
-          throw new CypherError('Token not found.', 'token_id: string', tokenId)
-        }
-
-        const character = getObj('character', token.get('represents'))
-        if (!character) {
-          throw new CypherError('Token does not represent a character.', 'token_id: string', tokenId)
-        }
-
-        dmgDealt = parseInt(dmgDealt, 10)
-        if (!dmgDealt) {
-          throw new CypherError('Damage dealt is not a number.', 'damage: number', dmgDealt)
-        }
-
-        const name = character.get('name')
-        let armor = parseInt(getAttrByName(character.id, 'armor', 'current'), 10)
-        if (!armor || applyArmor === 'n') {
-          armor = 0
-        }
-        const dmgTaken = (dmgDealt > 0)
-          ? Math.max((dmgDealt - armor), 0)
-          : dmgDealt
-
-        // Health objects differ between full NPCs and mooks, so they must be declared prior to assignment
-        let health = {}
-        let healthCurrent = 0
-        let healthMax = 0
-
-        // Is the token linked to a full NPC or just a Mook?
-        const isChar = token.get('bar1_link')
-        if (isChar) {
-        // Full-character NPC: get the health attribute values
-          health = findObjs({
+          objArray = findObjs({
             _type: 'attribute',
             _characterid: character.id,
-            name: 'health'
-          })[0]
-          if (!health) {
-            throw new CypherError(`${name} has no health attribute.`, 'attribute: object', health)
+            name: stat2
+          })
+          if (!objArray.length) {
+            pool2 = parseInt(getAttrByName(character.id, stat2, 'current')) || 0
+            max2 = parseInt(getAttrByName(character.id, stat2, 'max')) || 0
+            obj2 = createObj('attribute', {
+              characterid: character.id,
+              name: stat2,
+              current: pool2,
+              max: max2
+            })
+          } else {
+            obj2 = objArray[0]
+            pool2 = parseInt(obj2.get('current')) || 0
           }
-          healthCurrent = parseInt(health.get('current'))
-          healthMax = parseInt(health.get('max'))
+          objArray = findObjs({
+            _type: 'attribute',
+            _characterid: character.id,
+            name: stat3
+          })
+          if (!objArray.length) {
+            pool3 = parseInt(getAttrByName(character.id, stat3, 'current')) || 0
+            max3 = parseInt(getAttrByName(character.id, stat3, 'max')) || 0
+            obj3 = createObj('attribute', {
+              characterid: character.id,
+              name: stat3,
+              current: pool3,
+              max: max3
+            })
+          } else {
+            obj3 = objArray[0]
+            pool3 = parseInt(obj3.get('current')) || 0
+          }
+          // calculus
+          statCost = statCost - pool1
+          obj1.setWithWorker('current', 0)
+          if (statCost > pool2) {
+            statCost = statCost - pool2
+            obj2.setWithWorker('current', 0)
+            if (statCost > pool3) {
+              obj3.setWithWorker('current', 0)
+              sendChat(`character|${character.id}`, `He's dead, Jim! ${pool1}, ${pool2}, and ${pool3} down to 0.`)
+            } else {
+              finalPool = pool3 - statCost
+              obj3.setWithWorker('current', finalPool)
+              sendChat(`character|${character.id}`, `${stat1} and ${stat2} down to 0. ${stat3}: ${pool3}-${statCost}=${finalPool}`)
+            }
+          } else {
+            finalPool = pool2 - statCost
+            obj2.setWithWorker('current', finalPool)
+            sendChat(`character|${character.id}`, `${stat1} down to 0. ${stat2}: ${pool2}-${statCost}=${finalPool}`)
+          }
         } else {
-        // Mook: get the health bar values
-          healthCurrent = parseInt(token.get('bar2_value'))
-          healthMax = parseInt(token.get('bar2_max'))
+          // just the current stat is diminished
+          finalPool = pool1 - statCost
+          obj1.setWithWorker('current', finalPool)
+          sendChat(`character|${character.id}`, `${stat1}: ${pool1}-${statCost}=${finalPool}`)
         }
-
-        // If health attribute has no max, set max to current health
-        healthMax = Math.max(healthCurrent, healthMax)
-
-        const healthFinal = Math.min(Math.max((healthCurrent - dmgTaken), 0), healthMax)
-        if (isChar) {
-        // Full NPC: update health attribute
-          health.set('current', healthFinal)
-          health.set('max', healthMax)
-        } else {
-        // Mook: update health bars
-          token.set('bar2_value', healthFinal)
-          token.set('bar2_max', healthMax)
-        }
-        token.set('status_dead', (healthFinal === 0))
-        sendChat('Cypher System', `/w gm ${name} receives ${Math.abs(dmgTaken)} points of ${dmgDealt >= 0 ? `damage (${dmgDealt} - ${armor} Armor)` : 'healing'}. Health: ${healthCurrent}->${healthFinal}.`)
       }
+    }
+
+    // params: token_id|damage|apply_armor_y/n
+    function npcDamage (args) {
+      if (args.length !== 3) {
+        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-npcdmg}} {{Message=Invalid parameters}} {{Expected=token_id,damage,apply_armor_y/n}} {{Received=${args}}}`)
+        return false
+      }
+
+      const token = getObj('graphic', args[0])
+      if (!token) {
+        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-npcdmg}} {{Message=Token not found: ${args[0]}}}`)
+        return false
+      }
+
+      const character = getObj('character', token.get('represents'))
+      if (!character) {
+        sendChat('Cypher System', `&{template:default} {{name=Error}} {{Command=cypher-npcdmg}} {{Message=Token does not represent a character: ${args[0]}}}`)
+        return false
+      }
+
+      const dmgDealt = args[1]
+      const applyArmor = args[2]
+
+      // Apply damage (or healing if dmgDealt is negative ...) to Numenera NPC/Creature
+      // And set 'death' marker if health is 0 or less.
+      // The Mook or Non Player full Character must have the following attributes :
+      //  - Level (token bar1)
+      //  - Health (token bar2)
+      //  - Armor (token bar3)
+      // Armor will diminish damage unless 'applyArmor'='n'
+      const npcName = character.get('name')
+      let dmg = parseInt(dmgDealt) || 0
+      let npcHealth = 0
+      let npcMaxHealth = 0
+      let npcArmor = 0
+      let attributes = {}
+      if (applyArmor !== 'n') {
+        npcArmor = parseInt(getAttrByName(character.id, 'armor', 'current')) || 0
+        // DEBUG
+        // sendChat('Cypher System', `/w gm npcDamage() Debug : Armor of ("${npcName}", char id:${characterObj.id}, token id:${tokenObj.id}) = ${npcArmor}`)
+      }
+      // Is the token linked to the character ('full NPC') or a Mook ?
+      const isChar = token.get('bar1_link')
+      if (isChar === '') {
+        // It's a Mook : get the bars value
+        npcHealth = parseInt(token.get('bar2_value'))
+        npcMaxHealth = parseInt(token.get('bar2_max'))
+      } else {
+        // It's a full character NPC, so get the attributes values
+        attributes = findObjs({
+          _type: 'attribute',
+          _characterid: character.id,
+          name: 'health'
+        })
+        if (attributes === false) {
+          sendChat('Cypher System', `/w gm npcDamage() Error: ${npcName} has no health attribute!`)
+          return false
+        } else {
+          npcHealth = parseInt(attributes[0].get('current')) || 0
+          npcMaxHealth = parseInt(attributes[0].get('max')) || 0
+        }
+      }
+      // In case the Health attribute has no maximum value
+      npcMaxHealth = Math.max(npcHealth, npcMaxHealth)
+      if (dmg > 0) {
+        dmg = Math.max((dmg - npcArmor), 0)
+      }
+      const npcHealthFinal = Math.min(Math.max((npcHealth - dmg), 0), npcMaxHealth)
+      if (isChar === '') {
+        // Mook: update bars only
+        token.set('bar2_max', npcMaxHealth)
+        token.set('bar2_value', npcHealthFinal)
+      } else {
+        // Update character attributes
+        attributes[0].setWithWorker('max', npcMaxHealth)
+        attributes[0].setWithWorker('current', npcHealthFinal)
+      }
+      token.set('status_dead', (npcHealthFinal === 0))
+      sendChat('Cypher System', `/w gm ${npcName} receives ${Math.abs(dmg)} points of ${dmgDealt >= 0 ? `damage (${dmgDealt} - ${npcArmor} Armor)` : 'healing'}. Health: ${npcHealth}->${npcHealthFinal}.`)
+    }
+
+    return {
+      '!cypher-modstat': modifyStat,
+      '!cypher-npcdmg': npcDamage
     }
   })()
 
   function executeChatCommand (msg) {
+    // Validate chat command
     const validCommand = /^!cypher-\w+(\s|%20).+$/
     if (msg.type === 'api' && validCommand.test(msg.content)) {
       const command = msg.content.split(' ')[0]
       const args = msg.content.split(' ')[1].split('|')
       try {
-        CypherChatCommands[command](...args)
+        CypherChatCommands[command](args)
       } catch (e) {
-        sendChat('Cypher System', `/w gm Chat command ${command} failed.`)
-        sendChat('Cypher System', `/w gm ${e}`)
+        sendChat('Cypher System', `/w gm Error: Chat command ${command} failed. ${e}`)
       }
     }
   }
